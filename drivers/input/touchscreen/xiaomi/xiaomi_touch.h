@@ -121,8 +121,8 @@ struct xiaomi_touch_interface {
 	int thp_cmd_buf[MAX_BUF_SIZE];
 	char thp_cmd_data_buf[MAX_BUF_SIZE];
 	int thp_cmd_ready_buf[MAX_BUF_SIZE];
-	int thp_cmd_ready_size;
 	int thp_cmd_size;
+	int thp_cmd_ready_size;
 	int thp_cmd_data_size;
 	int touch_mode[Touch_Mode_NUM][VALUE_TYPE_SIZE];
 	wait_queue_head_t wait_queue;

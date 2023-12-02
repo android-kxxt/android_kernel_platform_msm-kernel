@@ -264,8 +264,8 @@ static long xiaomi_touch_dev_ioctl(struct file *file, unsigned int cmd,
 			touch_data->thp_cmd_buf[1] = buf[0];
 			touch_data->thp_cmd_buf[2] = buf[1];
 			touch_data->thp_cmd_buf[3] = buf[2];
-			touch_data->thp_cmd_size = 4;
 			touch_data->thp_cmd_ready_size = 4;
+			touch_data->thp_cmd_size = 4;
 			touch_data->touch_event_status = 1;
 			// ready_status = 1;
 		} else {
@@ -275,15 +275,15 @@ static long xiaomi_touch_dev_ioctl(struct file *file, unsigned int cmd,
 				touch_data->thp_cmd_buf[2] = buf[1];
 				touch_data->thp_cmd_buf[3] = buf[2];
 				memcpy(&(touch_data->thp_cmd_buf[4]), &buf[3], sizeof(int) * buf[2]);
-				touch_data->thp_cmd_ready_size = 4 + buf[2];
-				// touch_data->thp_cmd_size = 4 + buf[2];
+				touch_data->thp_cmd_size = 4 + buf[2];
+				// touch_data->thp_cmd_ready_size = 4 + buf[2];
 				// ready_status = 4 + buf[2];
 				touch_data->touch_event_status = 1;
 			} else if (user_cmd == RESET_MODE) {
 				touch_data->thp_cmd_buf[0] = user_cmd;
 				touch_data->thp_cmd_buf[1] = buf[0];
 				touch_data->thp_cmd_buf[2] = buf[1];
-				touch_data->thp_cmd_ready_size = 3;
+				touch_data->thp_cmd_size = 3;
 				// ready_status = 3;
 				touch_data->touch_event_status = 1;
 				
@@ -293,9 +293,9 @@ static long xiaomi_touch_dev_ioctl(struct file *file, unsigned int cmd,
 		}
 	}
 
-	touch_data->thp_cmd_size = touch_data->thp_cmd_ready_size;
+	touch_data->thp_cmd_ready_size = touch_data->thp_cmd_size;
 	touch_data->touch_event_ready_status = touch_data->touch_event_status;
-	memcpy(touch_data->thp_cmd_ready_buf, touch_data->thp_cmd_buf, touch_data->thp_cmd_ready_size * sizeof(int));
+	memcpy(touch_data->thp_cmd_ready_buf, touch_data->thp_cmd_buf, touch_data->thp_cmd_size * sizeof(int));
 	sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL,
 					"touch_thp_cmd_ready");
 	if((touch_pdata->param_head == touch_pdata->param_tail)
@@ -310,9 +310,9 @@ static long xiaomi_touch_dev_ioctl(struct file *file, unsigned int cmd,
 		asm("brk #0x5512");
 	}
 	touch_pdata->touch_cmd_data[touch_pdata->param_tail]->thp_cmd_size = \
-		touch_data->thp_cmd_ready_size;
+		touch_data->thp_cmd_size;
 	memcpy(touch_pdata->touch_cmd_data[touch_pdata->param_tail]->param_buf, \
-		touch_data->thp_cmd_buf, touch_data->thp_cmd_ready_size * sizeof(int));
+		touch_data->thp_cmd_buf, touch_data->thp_cmd_size * sizeof(int));
 	if (touch_pdata->param_tail == PARAM_BUF_NUM - 1)
 		touch_pdata->param_tail = 0;
 	else
@@ -832,7 +832,7 @@ struct device_attribute *attr, char *buf)
 	}
 
 	touch_data = touch_pdata->touch_data[0];
-	memcpy(buf, touch_data->thp_cmd_buf, touch_data->thp_cmd_ready_size * sizeof(int));
+	memcpy(buf, touch_data->thp_cmd_buf, touch_data->thp_cmd_size * sizeof(int));
 	if((touch_pdata->param_head == touch_pdata->param_tail)
 		&& (touch_pdata->param_flag == 0)) {
 		pr_err("[MITouch-ERR][%s:%d] %s param buffer is empty!\n", __func__, __LINE__, __func__);
@@ -853,7 +853,7 @@ struct device_attribute *attr, char *buf)
 	touch_data->touch_event_status = 0;
 	__wake_up(&touch_data->wait_queue, 3, 0, 0);
 	mutex_unlock(&dev->mutex);
-	return touch_data->thp_cmd_ready_size * sizeof(int);
+	return touch_data->thp_cmd_size * sizeof(int);
 }
 
 static ssize_t thp_cmd_status_store(struct device *dev,
@@ -898,15 +898,15 @@ struct device_attribute *attr, const char *buf, size_t count)
 		for (i = 0; i < para_cnt; i++) {
 			touch_data->thp_cmd_buf[i] = input[i];
 		}
-		touch_data->thp_cmd_ready_size = para_cnt;
+		touch_data->thp_cmd_size = para_cnt;
 		touch_data->touch_event_status = 1;
 		if ((touch_pdata->param_head != touch_pdata->param_tail)
 			|| (touch_pdata->param_flag != 1)) {
 			spin_lock(&touch_pdata->param_lock);
 			BUG_ON(touch_pdata->param_tail >= PARAM_BUF_NUM);
-			touch_pdata->touch_cmd_data[touch_pdata->param_tail]->thp_cmd_size = touch_data->thp_cmd_ready_size;
+			touch_pdata->touch_cmd_data[touch_pdata->param_tail]->thp_cmd_size = touch_data->thp_cmd_size;
 			memcpy(touch_pdata->touch_cmd_data[touch_pdata->param_tail], touch_data->thp_cmd_buf,
-					touch_data->thp_cmd_ready_size * sizeof(int));
+					touch_data->thp_cmd_size * sizeof(int));
 			if (touch_pdata->param_tail != PARAM_BUF_NUM - 1)
 				touch_pdata->param_tail++;
 			if (touch_pdata->param_tail == touch_pdata->param_head)
@@ -956,9 +956,9 @@ struct device_attribute *attr, char *buf)
 		return -ENOMEM;
 	}
 	touch_data = touch_pdata->touch_data[0];
-	memcpy(buf, touch_data->thp_cmd_ready_buf, touch_data->thp_cmd_size * sizeof(int));
+	memcpy(buf, touch_data->thp_cmd_ready_buf, touch_data->thp_cmd_ready_size * sizeof(int));
 	mutex_unlock(&dev->mutex);
-	return touch_data->thp_cmd_size * sizeof(int);
+	return touch_data->thp_cmd_ready_size * sizeof(int);
 }
 
 static ssize_t thp_cmd_ready_status_store(struct device *dev,
@@ -1000,7 +1000,7 @@ struct device_attribute *attr, const char *buf, size_t count)
 		for (i = 0; i < para_cnt; i++) {
 			touch_data->thp_cmd_ready_buf[i] = input[i];
 		}
-		touch_data->thp_cmd_size = para_cnt;
+		touch_data->thp_cmd_ready_size = para_cnt;
 		touch_data->touch_event_ready_status = 1;
 		sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL, "touch_thp_cmd_ready");
 	} else {
@@ -1021,7 +1021,7 @@ struct device_attribute *attr, char *buf)
 	touch_data = touch_pdata->touch_data[0];
 	memcpy(buf, touch_data->thp_cmd_data_buf, touch_data->thp_cmd_data_size);
 
-	return touch_data->thp_cmd_size * sizeof(int);
+	return touch_data->thp_cmd_ready_size * sizeof(int);
 }
 
 static ssize_t thp_cmd_data_store(struct device *dev,
@@ -1062,7 +1062,7 @@ void thp_send_cmd_to_hal(int cmd, int value)
 	touch_data->thp_cmd_buf[1] = 0;
 	touch_data->thp_cmd_buf[2] = cmd;
 	touch_data->thp_cmd_buf[3] = value;
-	touch_data->thp_cmd_ready_size = 4;
+	touch_data->thp_cmd_size = 4;
 	touch_data->touch_event_status = 1;
 	if ((touch_pdata->param_head == touch_pdata->param_tail) && (touch_pdata->param_flag == 1)) {
 		pr_info("[MITouch-ERR][%s:%d] %s param buffer is full!\n", __func__, __LINE__, __func__);
@@ -1073,9 +1073,9 @@ void thp_send_cmd_to_hal(int cmd, int value)
 
 	BUG_ON(touch_pdata->param_tail >= PARAM_BUF_NUM);
 
-	touch_pdata->touch_cmd_data[touch_pdata->param_tail]->thp_cmd_size = touch_data->thp_cmd_ready_size;
+	touch_pdata->touch_cmd_data[touch_pdata->param_tail]->thp_cmd_size = touch_data->thp_cmd_size;
 	memcpy(touch_pdata->touch_cmd_data[touch_pdata->param_tail], touch_data->thp_cmd_buf,
-			touch_data->thp_cmd_ready_size * sizeof(int));
+			touch_data->thp_cmd_size * sizeof(int));
 	if (touch_pdata->param_tail != PARAM_BUF_NUM - 1)
 		touch_pdata->param_tail++;
 	if (touch_pdata->param_tail == touch_pdata->param_head)
