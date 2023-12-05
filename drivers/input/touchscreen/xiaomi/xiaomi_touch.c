@@ -164,8 +164,6 @@ static int xiaomi_touch_dev_open(struct inode *inode, struct file *file)
 
 	pr_info("%s\n", __func__);
 
-	dump_stack();
-
 	dev = xiaomi_touch_dev_get(i);
 	if (!dev) {
 		pr_err("%s cant get dev\n", __func__);
@@ -206,8 +204,6 @@ static long xiaomi_touch_dev_ioctl(struct file *file, unsigned int cmd,
 	struct xiaomi_touch *dev = pdata->device;
 	int user_cmd = _IOC_NR(cmd);
 	int ready_status;
-
-	dump_stack();
 
 	mutex_lock(&dev->mutex);
 	ret = copy_from_user(&buf, (int __user *)argp, sizeof(buf));
