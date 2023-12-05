@@ -1788,7 +1788,7 @@ static irqreturn_t goodix_ts_threadirq_func(int irq, void *data)
 		}
 	}
 
-	if ((core_data->work_status == 1) && (goodix_gesture_ist(core_data, NULL) == 1)) {
+	if ((core_data->work_status == 1) && (goodix_gesture_ist(core_data) == 1)) {
 		mutex_unlock(&goodix_modules.mutex);
 		return IRQ_HANDLED;	
 	}
