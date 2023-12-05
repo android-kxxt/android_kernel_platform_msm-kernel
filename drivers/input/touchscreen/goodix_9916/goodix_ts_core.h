@@ -364,6 +364,8 @@ enum ts_event_type {
 	EVENT_REQUEST = (1 << 2),
 	EVENT_GESTURE = (1 << 3),
 	EVENT_FRAME = (1 << 4),
+	
+	EVENT_FOD = (1 << 7),
 };
 
 enum ts_request_type {
@@ -770,8 +772,8 @@ void goodix_fw_update_uninit(void);
 int goodix_do_fw_update(struct goodix_ic_config *ic_config, int mode);
 
 int goodix_gesture_ist(struct goodix_ts_core *cd);
-int gsx_gesture_before_suspend(struct goodix_ts_core *cd);
-int gsx_gesture_before_resume(struct goodix_ts_core *cd);
+int gsx_gesture_before_suspend(struct goodix_ts_core *cd, struct goodix_ext_module *module);
+int gsx_gesture_before_resume(struct goodix_ts_core *cd, struct goodix_ext_module *module);
 
 int goodix_get_ic_type(struct device_node *node);
 int gesture_module_init(void);

@@ -161,11 +161,6 @@ out:
 	return buf2;
 }
 
-int goodix_gesture_ist(struct goodix_ts_core *cd) {
-	// TODO: implement
-	return 0;
-}
-
 int goodix_touch_doze_analysis(int value) {
 	struct goodix_ts_board_data *board_data;
 	struct gpio_desc *desc;
@@ -1793,7 +1788,7 @@ static irqreturn_t goodix_ts_threadirq_func(int irq, void *data)
 		}
 	}
 
-	if ((core_data->work_status == 1) && (goodix_gesture_ist(core_data) == 1)) {
+	if ((core_data->work_status == 1) && (goodix_gesture_ist(core_data, NULL) == 1)) {
 		mutex_unlock(&goodix_modules.mutex);
 		return IRQ_HANDLED;	
 	}
@@ -2417,7 +2412,7 @@ static int goodix_ts_suspend(struct goodix_ts_core *core_data)
 
 	if (core_data->doze_test != false) {
 		if (goodix_ts_power_off(core_data) < 0)
-			ts_info("%s: ERROR Failed to enable regulators")
+			ts_info("%s: ERROR Failed to enable regulators");
 	}
 
 	mutex_unlock(&goodix_modules.mutex);
@@ -2455,7 +2450,7 @@ static int goodix_ts_suspend(struct goodix_ts_core *core_data)
 		}
 		mutex_unlock(&goodix_modules.mutex);
 	} else {
-		gsx_gesture_before_suspend(core_data);
+		gsx_gesture_before_suspend(core_data, NULL);
 	}
 
 LAB_00113790:
@@ -2465,17 +2460,16 @@ LAB_00113790:
 	} else if (core_data->fod_finger != false) {
 		mutex_lock(&core_data->input_dev->mutex);
 		core_data->fod_finger = false;
-		input_event(input_dev, EV_KEY, BTN_INFO, 0);
-		input_event(input_dev, EV_ABS, ABS_MT_WIDTH_MAJOR, 0);
-		input_event(input_dev, EV_ABS, ABS_MT_WIDTH_MINOR, 0);
-		input_sync(input_dev);
+		input_event(core_data->input_dev, EV_KEY, BTN_INFO, 0);
+		input_event(core_data->input_dev, EV_ABS, ABS_MT_WIDTH_MAJOR, 0);
+		input_event(core_data->input_dev, EV_ABS, ABS_MT_WIDTH_MINOR, 0);
+		input_sync(core_data->input_dev);
 		update_fod_press_status(0);
 		ts_info("ts fod up for suspend");
 		mutex_unlock(&core_data->input_dev->mutex);
 	}
 
 	xiaomi_touch_set_suspend_state(1);
-out:
 	ts_info("Suspend end");
 
 	mutex_unlock(&core_data->core_mutex);
@@ -3434,15 +3428,8 @@ static int goodix_reset_mode(int mode)
 		queue_work(goodix_core_data->game_wq, &goodix_core_data->game_work);
 	} else if (mode == 0) {
 		for (i = 0; i <= Touch_Panel_Orientation; i++) {
-			if (i == Touch_Panel_Orientation)
-				xiaomi_touch_interfaces.touch_mode[i][SET_CUR_VALUE] =
-					xiaomi_touch_interfaces.touch_mode[i][SET_CUR_VALUE];
-			else {
-				xiaomi_touch_interfaces.touch_mode[i][SET_CUR_VALUE] =
-					xiaomi_touch_interfaces.touch_mode[i][GET_DEF_VALUE];
-				xiaomi_touch_interfaces.touch_mode[i][GET_CUR_VALUE] =
-					xiaomi_touch_interfaces.touch_mode[i][SET_CUR_VALUE];
-			}
+			xiaomi_touch_interfaces.touch_mode[i][SET_CUR_VALUE] =
+				xiaomi_touch_interfaces.touch_mode[i][GET_DEF_VALUE];
 		}
 		queue_work(goodix_core_data->game_wq, &goodix_core_data->game_work);
 	} else {
