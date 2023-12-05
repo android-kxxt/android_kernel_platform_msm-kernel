@@ -227,7 +227,7 @@ static int gsx_gesture_exit(struct goodix_ts_core *cd,
  * @module: pointer to goodix_ext_module struct
  * return: 0 goon execute, EVT_CANCEL_IRQEVT  stop execute
  */
-static int gsx_gesture_ist(struct goodix_ts_core *cd,
+int gsx_gesture_ist(struct goodix_ts_core *cd,
 	struct goodix_ext_module *module)
 {
 	struct goodix_ts_hw_ops *hw_ops = cd->hw_ops;
@@ -255,7 +255,8 @@ static int gsx_gesture_ist(struct goodix_ts_core *cd,
 		goto re_send_ges_cmd;
 	}
 
-	memcpy(gesture_data,gs_event.touch_data.tmp_data,32*sizeof(u8));
+	// memcpy(gesture_data,gs_event.touch_data.tmp_data,32*sizeof(u8));
+	// TODO
 	if ((gesture_data[0] & 0x08)  != 0)
 		FP_Event_Gesture = 1;
 #ifdef GOODIX_FOD_AREA_REPORT
@@ -351,7 +352,7 @@ re_send_ges_cmd:
  * @module: pointer to goodix_ext_module struct
  * return: 0 goon execute, EVT_IRQCANCLED  stop execute
  */
-static int gsx_gesture_before_suspend(struct goodix_ts_core *cd,
+int gsx_gesture_before_suspend(struct goodix_ts_core *cd,
 	struct goodix_ext_module *module)
 {
 	int ret;

@@ -957,6 +957,7 @@ static int brl_get_ic_info(struct goodix_ts_core *cd,
 }
 
 #define GOODIX_ESD_TICK_WRITE_DATA	0xAA
+// ABOVE not changed
 static int brl_esd_check(struct goodix_ts_core *cd)
 {
 	int ret;
@@ -1169,11 +1170,48 @@ static int brl_event_handler(struct goodix_ts_core *cd,
 {
 	struct goodix_ts_hw_ops *hw_ops = cd->hw_ops;
 	struct goodix_ic_info_misc *misc = &cd->ic_info.misc;
+	struct timespec64 ts = { 0 };
+	struct rtc_time rtime = { 0 };
+	static long frame_cnt = 0;
 	int pre_read_len;
 	u8 pre_buf[32];
 	u8 event_status;
 	u8 large_touch_status;
 	int ret;
+
+	if (cd->enable_touch_raw) {
+		ret = hw_ops->read(cd, misc->frame_data_addr,
+				&ts_event->tp_frame.thp_frame[0],
+				sizeof(ts_event->tp_frame.thp_frame));
+		if (ret) {
+			ts_err("failed get frame data");
+			return -EINVAL;
+		}
+		ts_debug("event_status = 0x%x", ts_event->tp_frame.thp_frame[0]);
+		if (ts_event->tp_frame.thp_frame[0] & GOODIX_TOUCH_EVENT) {
+			if (cd->unknown_uint == 2) {
+				hw_ops->after_event_handler(cd);
+			}
+			ktime_get_real_ts64(&ts);
+			ts_event->event_type = EVENT_FRAME;
+			ts_event->tp_frame.frame_cnt = frame_cnt;
+			ts_event->tp_frame.fod_pressed = cd->fod_finger;
+			if(ts.tv_sec < 0x225c17d04) {
+				ts_event->tp_frame.time_ns = ts.tv_sec * 1000000000 + ts.tv_nsec;
+			} else {
+				ts_event->tp_frame.time_ns = 0x7fffffffffffffff;
+			}
+			copy_touch_rawdata((char*)(&ts_event->tp_frame), sizeof(ts_event->tp_frame));
+			update_touch_rawdata();
+			rtc_time64_to_tm(ts.tv_sec, &rtime);
+			frame_cnt++;
+			return 0;
+		} else {
+			ts_err("invalid event type: %d", ts_event->tp_frame.thp_frame[0]);
+			return -EINVAL;
+		}
+		return ret;
+	}
 
 	pre_read_len = IRQ_EVENT_HEAD_LEN +
 		BYTES_PER_POINT * 2 + COOR_DATA_CHECKSUM_SIZE;
@@ -1192,8 +1230,7 @@ static int brl_event_handler(struct goodix_ts_core *cd,
 	}
 	large_touch_status = pre_buf[2];
 	event_status = pre_buf[0];
-	ts_err("event_status = %d\n",event_status);
-	memcpy (ts_event->touch_data.tmp_data,pre_buf,32*sizeof(u8));
+	ts_debug("event_status = %d\n",event_status);
 
 	if (event_status & GOODIX_POWERON_FOD_EVENT){
 		cd->eventsdata = event_status;
@@ -1217,6 +1254,8 @@ static int brl_event_handler(struct goodix_ts_core *cd,
 		ts_event->gesture_type = pre_buf[4];
 	}
 
+	hw_ops->after_event_handler(cd);
+
 	if (cd->palm_status) {
 		if (large_touch_status & GOODIX_LRAGETOUCH_EVENT) {
 			update_palm_sensor_value(1);
@@ -1239,7 +1278,7 @@ static int brl_after_event_handler(struct goodix_ts_core *cd)
 		&sync_clean, 1);
 }
 
-static int brld_get_framedata(struct goodix_ts_core *cd,
+static int brld_get_framedata(struct goodix_ts_core *cd, /* goodix_brl_hw.c:1242 */
 		struct ts_rawdata_info *info)
 {
 	int ret;
