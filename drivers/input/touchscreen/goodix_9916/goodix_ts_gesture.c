@@ -391,6 +391,7 @@ int goodix_gesture_ist(struct goodix_ts_core *cd)
 	}
 	cd->fod_finger = true;
 	update_fod_press_status(1);
+	goto final_exit;
 // 	if ((gesture_data[0] & 0x08)  != 0)
 // 		FP_Event_Gesture = 1;
 // #ifdef GOODIX_FOD_AREA_REPORT

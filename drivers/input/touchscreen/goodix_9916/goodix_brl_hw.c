@@ -304,15 +304,17 @@ static int brl_reset(struct goodix_ts_core *cd, int delay)
 
 static int brl_irq_enbale(struct goodix_ts_core *cd, bool enable)
 {
+	struct irq_desc* desc = irq_to_desc(cd->irq);
+	ts_info("irq enable: %d depth: %d", enable, desc->depth);
 	if (enable && !atomic_cmpxchg(&cd->irq_enabled, 0, 1)) {
 		enable_irq(cd->irq);
-		ts_debug("Irq enabled");
+		ts_info("Irq enabled");
 		return 0;
 	}
 
 	if (!enable && atomic_cmpxchg(&cd->irq_enabled, 1, 0)) {
 		disable_irq_nosync(cd->irq);
-		ts_debug("Irq disabled");
+		ts_info("Irq disabled");
 		return 0;
 	}
 	ts_info("warnning: irq deepth inbalance!");

@@ -54,6 +54,7 @@ static int goodix_send_ic_config(struct goodix_ts_core *cd, int type);
 static void goodix_set_gesture_work(struct work_struct *work);
 int goodix_ts_get_lockdown_info(struct goodix_ts_core *cd);
 static irqreturn_t goodix_ts_threadirq_func(int irq, void *data);
+static int goodix_reset_mode(int mode);
 
 struct drm_panel *active_panel;
 extern struct device_node *gf_spi_dp;
@@ -87,7 +88,8 @@ static int goodix_ts_check_panel()
 
 
 void goodix_thp_signal_work(struct work_struct* work) {
-	struct goodix_ts_core *core_data = container_of(work, struct goodix_ts_core, thp_signal_work);
+	struct delayed_work* dwork = to_delayed_work(work);
+	struct goodix_ts_core *core_data = container_of(dwork, struct goodix_ts_core, thp_signal_work);
 	if (core_data == NULL) {
 		ts_err("core data not init");
 		return;
@@ -2535,11 +2537,16 @@ static int goodix_ts_resume(struct goodix_ts_core *core_data)
 	int ret;
 
 	if (core_data->init_stage < CORE_INIT_STAGE2 ||
-			!atomic_read(&core_data->suspended))
+			!atomic_read(&core_data->suspended)) {
+		ts_err("Already resumed");
 		return 0;
+	}
+
+	mutex_lock(&core_data->core_mutex);
 
 	ts_info("Resume start");
 	atomic_set(&core_data->suspended, 0);
+	core_data->irq_trig_cnt = 0;
 
 	mutex_lock(&goodix_modules.mutex);
 	if (!list_empty(&goodix_modules.head)) {
@@ -2560,37 +2567,51 @@ static int goodix_ts_resume(struct goodix_ts_core *core_data)
 	}
 	mutex_unlock(&goodix_modules.mutex);
 
-	if (core_data->pinctrl) {
-		ret = pinctrl_select_state(core_data->pinctrl,
-					core_data->pin_sta_active);
-		if (ret < 0)
-			ts_err("Failed to select active pinstate, ret:%d", ret);
-	}
+	if (core_data->gesture_enabled == 0 && core_data->fod_finger == false) {
+		if (core_data->pinctrl) {
+			ret = pinctrl_select_state(core_data->pinctrl,
+						core_data->pin_sta_active);
+			if (ret < 0)
+				ts_err("Failed to select active pinstate, ret:%d", ret);
+		}
+	
 
-	/* reset device or power on*/
-	if (hw_ops->resume)
-		hw_ops->resume(core_data);
-	core_data->work_status = TP_NORMAL;
-	mutex_lock(&goodix_modules.mutex);
-	if (!list_empty(&goodix_modules.head)) {
-		list_for_each_entry_safe(ext_module, next,
-					 &goodix_modules.head, list) {
-			if (!ext_module->funcs->after_resume)
-				continue;
+		if (core_data->doze_test != false) {
+			if (goodix_ts_power_on(core_data) < 0)
+				ts_info("%s: ERROR Failed to enable regulators");
+		}
 
-			ret = ext_module->funcs->after_resume(core_data,
-							    ext_module);
-			if (ret == EVT_CANCEL_RESUME) {
-				mutex_unlock(&goodix_modules.mutex);
-				ts_info("Canceled by module:%s",
-					ext_module->name);
-				goto out;
+		/* reset device or power on*/
+		if (hw_ops->resume)
+			hw_ops->resume(core_data);
+		core_data->work_status = TP_NORMAL;
+		mutex_lock(&goodix_modules.mutex);
+		if (!list_empty(&goodix_modules.head)) {
+			list_for_each_entry_safe(ext_module, next,
+						&goodix_modules.head, list) {
+				if (!ext_module->funcs->after_resume)
+					continue;
+
+				ret = ext_module->funcs->after_resume(core_data,
+									ext_module);
+				if (ret == EVT_CANCEL_RESUME) {
+					mutex_unlock(&goodix_modules.mutex);
+					ts_info("Canceled by module:%s",
+						ext_module->name);
+					goto out;
+				}
 			}
 		}
+		mutex_unlock(&goodix_modules.mutex);
+	} else {
+		gsx_gesture_before_resume(core_data, NULL);
 	}
-	mutex_unlock(&goodix_modules.mutex);
 
 out:
+	core_data->work_status = 0;
+	if (core_data->charger_status != 0) {
+		hw_ops->charger_on(core_data, true);
+	}
 	/* enable palm sensor */
 	if (core_data->palm_status)
 		ret = hw_ops->palm_on(core_data, core_data->palm_status);
@@ -2602,7 +2623,10 @@ out:
 	/* update ic_info */
 	hw_ops->get_ic_info(core_data, &core_data->ic_info);
 	//
+	goodix_reset_mode(0);
+	xiaomi_touch_set_suspend_state(0);
 	ts_info("Resume end");
+	mutex_unlock(&core_data->core_mutex);
 	return 0;
 }
 static void goodix_ts_resume_work(struct work_struct *work)
@@ -2661,8 +2685,9 @@ void goodix_drm_state_change_callback(enum panel_event_notifier_tag tag,
 
 void goodix_register_panel_notifier_work(struct work_struct* work) {
 	static int check_count = 0;
+	struct delayed_work* dwork = to_delayed_work(work);
 	struct goodix_ts_core *cd =
-		container_of(work, struct goodix_ts_core, panel_notifier_register_work);
+		container_of(dwork, struct goodix_ts_core, panel_notifier_register_work);
 	ts_info("%s enter", __func__);
 	goodix_ts_check_panel();
 
@@ -2670,7 +2695,7 @@ void goodix_register_panel_notifier_work(struct work_struct* work) {
 		ts_err("Failed to register panel notifier, try again");
 		if (check_count < 5) {
 			check_count++;
-			queue_delayed_work(system_wq, &cd->panel_notifier_register_work, 0x4e2);
+			queue_delayed_work(system_wq, dwork, 0x4e2);
 			return;
 		}
 		ts_err("Failed to register panel notifier, not try");
@@ -3261,18 +3286,76 @@ static void goodix_set_gesture_work(struct work_struct *work)
 {
 	struct goodix_ts_core *core_data =
 		container_of(work, struct goodix_ts_core, gesture_work);
+	struct goodix_ts_hw_ops *hw_ops = core_data->hw_ops;
+	unsigned int tmp, x;
+
+	pm_stay_awake(core_data->bus->dev);
+
+	if (core_data->tp_pm_suspend) {
+		ts_info("device in suspend, wait to resume");
+		if (0 == wait_for_completion_timeout(&core_data->pm_resume_completion, 0x26)) {
+			pm_relax(core_data->bus->dev);
+			ts_err("system can't finished resuming procedure");
+			return;
+		}
+	}
+
 	ts_debug("double is 0x%x",core_data->double_wakeup);
 	ts_debug("aod is 0x%x",core_data->aod_status);
+	ts_debug("nonui is 0x%x",core_data->nonui_status);
 	ts_debug("fod is 0x%x",core_data->fod_status);
+	ts_debug("fod icon is 0x%x",core_data->fod_icon_status);
 	ts_debug("enable is 0x%x",core_data->gesture_enabled);
-	if((core_data->double_wakeup) ||
-		(core_data->aod_status) || (core_data->fod_status))
-		core_data->gesture_enabled |= (1 << 0);
-	else
-		core_data->gesture_enabled &= ~(1 << 0);
 
-	ts_info("set gesture_enabled:%d", core_data->gesture_enabled);
-	goodix_gesture_enable(core_data->gesture_enabled);
+	mutex_lock(&core_data->core_mutex);
+
+	if (core_data->nonui_status == 2) {
+		tmp = 0;
+	} else {
+		x = (core_data->nonui_status == 0) && (core_data->aod_status != 0);
+		if (core_data->double_wakeup) {
+			x |= 2;
+		}
+		tmp = x;
+		if (core_data->fod_status < 4) {
+			tmp = x | 4;
+			if (core_data->fod_icon_status) {
+				tmp = x | 5;
+				if (core_data->nonui_status != 0) {
+					tmp = x | 4;
+				}
+			}
+		}
+	}
+
+	if (core_data->gesture_enabled != tmp) {
+		ts_info("gesture enable changed from 0x%x to 0x%x", core_data->gesture_enabled, tmp);
+		core_data->gesture_enabled = tmp;
+		if (atomic_read(&core_data->suspended) == 0) {
+			ts_debug("tp is in resume state, wait suspend to send cmd!")
+		} else if (core_data->fod_finger == false) {
+			if (core_data->gesture_enabled == 0 || core_data->work_status != 2) {
+				hw_ops->gesture(core_data, core_data->gesture_enabled);
+			} else {
+				ts_info("ic is in sleep already, need to reset");
+				hw_ops->reset(core_data, 100);
+				core_data->work_status = 1;
+				if (0 == hw_ops->gesture(core_data, core_data->gesture_enabled)) {
+					ts_info("enter gesture mode");
+				} else {
+					ts_err("failed enter gesture mode");
+				}
+				hw_ops->irq_enable(core_data, true);
+				irq_set_irq_wake(core_data->irq, 1);
+			}
+		} else {
+			ts_info("fod has already pressed!");
+		}
+	}
+
+	pm_relax(core_data->bus->dev);
+	mutex_unlock(&core_data->core_mutex);
+
 	return;
 }
 
@@ -3524,7 +3607,7 @@ static int goodix_reset_mode(int mode)
 			xiaomi_touch_interfaces.touch_mode[mode][GET_DEF_VALUE];
 		queue_work(goodix_core_data->game_wq, &goodix_core_data->game_work);
 	} else if (mode == 0) {
-		for (i = 0; i <= Touch_Panel_Orientation; i++) {
+		for (i = 0; i < Touch_Panel_Orientation; i++) {
 			xiaomi_touch_interfaces.touch_mode[i][SET_CUR_VALUE] =
 				xiaomi_touch_interfaces.touch_mode[i][GET_DEF_VALUE];
 		}
