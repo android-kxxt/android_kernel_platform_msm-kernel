@@ -301,10 +301,7 @@ static long xiaomi_touch_dev_ioctl(struct file *file, unsigned int cmd,
 		return -ENFILE;
 	}
 	spin_lock(&touch_pdata->param_lock);
-	if (touch_pdata->param_tail >= PARAM_BUF_NUM) {
-		// some possibly compiler generated bound check happens here (brk instruction)
-		asm("brk #0x5512");
-	}
+	BUG_ON(touch_pdata->param_tail >= PARAM_BUF_NUM);
 	touch_pdata->touch_cmd_data[touch_pdata->param_tail]->thp_cmd_size = \
 		touch_data->thp_cmd_size;
 	memcpy(touch_pdata->touch_cmd_data[touch_pdata->param_tail]->param_buf, \
@@ -317,7 +314,7 @@ static long xiaomi_touch_dev_ioctl(struct file *file, unsigned int cmd,
 		touch_pdata->param_flag = 1;
 	spin_unlock(&touch_pdata->param_lock);
 	sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL,
-					"touch_thp_cmd_ready");
+					"touch_thp_cmd");
 exit:
 	if (ret >= 0)
 		ret = copy_to_user((int __user *)argp, &buf, sizeof(buf));
@@ -334,8 +331,7 @@ static int xiaomi_touch_dev_mmap(struct file *file, struct vm_area_struct *vma)
 	struct xiaomi_touch_pdata *pdata = file->private_data;
 	unsigned long start = vma->vm_start;
 	unsigned long size = vma->vm_end - vma->vm_start;
-	unsigned long paddr = (unsigned long)pdata->phy_base + vma->vm_pgoff * 0x1000;
-	unsigned long pfn = paddr >> 0xc;
+	unsigned long pfn = ((unsigned long)pdata->phy_base + vma->vm_pgoff * 0x1000) >> 0xc;
 
 	if (!pdata) {
 		pr_err("%s invalid memory\n", __func__);
@@ -760,8 +756,8 @@ struct device_attribute *attr, const char *buf, size_t count)
 		touch_data->enable_touch_raw(!!input);
 
 	touch_data->is_enable_touchraw = !!input;
-	touch_pdata->raw_tail = 0;
 	touch_pdata->raw_head = 0;
+	touch_pdata->raw_tail = 0;
 
 	return count;
 }
@@ -838,14 +834,19 @@ struct device_attribute *attr, char *buf)
 	spin_lock(&touch_pdata->param_lock);
 	BUG_ON(touch_pdata->param_head >= PARAM_BUF_NUM);
 	memcpy(buf, touch_pdata->touch_cmd_data[touch_pdata->param_head],
-		touch_pdata->touch_cmd_data[touch_pdata->param_head]->thp_cmd_size);
-	if(touch_pdata->param_head < PARAM_BUF_NUM)
+		touch_pdata->touch_cmd_data[touch_pdata->param_head]->thp_cmd_size * sizeof(int));
+	if(touch_pdata->param_head != PARAM_BUF_NUM - 1)
 		touch_pdata->param_head++;
 	if(touch_pdata->param_head == touch_pdata->param_tail)
 		touch_pdata->param_flag = 0;
 	spin_unlock(&touch_pdata->param_lock);
-	if(touch_pdata->param_head != touch_pdata->param_tail)
-		sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL, "touch_thp_cmd");
+	// if(touch_pdata->param_head != touch_pdata->param_tail) {
+	// TODO: the stock driver does this.
+	//       But it is causing infinite events. Maybe I messed up something else?
+	// 	dump_stack();
+	// 	pr_info("%s: notify thp_cmd_status\n", __func__);
+	// 	sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL, "touch_thp_cmd");
+	// }
 	touch_data->touch_event_status = 0;
 	__wake_up(&touch_data->wait_queue, 3, 0, 0);
 	mutex_unlock(&dev->mutex);
@@ -890,7 +891,7 @@ struct device_attribute *attr, const char *buf, size_t count)
 	}
 
 	pr_info("%s size:%d, cmd:%d, %d, %d, %d\n", __func__, para_cnt, input[0], input[1], input[2], input[3]);
-	if (sizeof(int) * para_cnt < MAX_BUF_SIZE) {
+	if (((long)para_cnt & 0x3fffffffffffffc0U) == 0) {
 		for (i = 0; i < para_cnt; i++) {
 			touch_data->thp_cmd_buf[i] = input[i];
 		}
@@ -992,7 +993,7 @@ struct device_attribute *attr, const char *buf, size_t count)
 	}
 
 	pr_info("%s size:%d, cmd:%d, %d, %d, %d\n", __func__, para_cnt, input[0], input[1], input[2], input[3]);
-	if (sizeof(int) * para_cnt < MAX_BUF_SIZE) {
+	if (((long)para_cnt & 0x3fffffffffffffc0U) == 0) {
 		for (i = 0; i < para_cnt; i++) {
 			touch_data->thp_cmd_ready_buf[i] = input[i];
 		}
@@ -1017,7 +1018,7 @@ struct device_attribute *attr, char *buf)
 	touch_data = touch_pdata->touch_data[0];
 	memcpy(buf, touch_data->thp_cmd_data_buf, touch_data->thp_cmd_data_size);
 
-	return touch_data->thp_cmd_ready_size * sizeof(int);
+	return touch_data->thp_cmd_ready_size;
 }
 
 static ssize_t thp_cmd_data_store(struct device *dev,
@@ -1077,6 +1078,10 @@ void thp_send_cmd_to_hal(int cmd, int value)
 	if (touch_pdata->param_tail == touch_pdata->param_head)
 		touch_pdata->param_flag = 1;
 	spin_unlock(&touch_pdata->param_lock);
+
+	// dump_stack();
+	// pr_info("%s: notify touch_thp_cmd\n", __func__);
+
 	sysfs_notify(&xiaomi_touch_device->dev->kobj, NULL, "touch_thp_cmd");
 	if (touch_data->touch_event_status != 0) {
 		init_wait_entry(&wait_entry, 0);
@@ -1366,8 +1371,9 @@ struct device_attribute *attr, char *buf)
 			remaining = RAW_BUF_NUM - touch_pdata->raw_head + touch_pdata->raw_tail;
 		memcpy((unsigned char *)touch_pdata->raw_data,  (unsigned char *)touch_pdata->raw_buf[touch_pdata->raw_head],  touch_pdata->raw_len);
 		spin_lock(&touch_pdata->raw_lock);
-		touch_pdata->raw_head++;
-		if (touch_pdata->raw_head   == RAW_BUF_NUM)
+		if (touch_pdata->raw_head   != RAW_BUF_NUM - 1)
+			touch_pdata->raw_head++;
+		else
 			touch_pdata->raw_head = 0;
 		spin_unlock(&touch_pdata->raw_lock);
 	}
@@ -1380,10 +1386,11 @@ struct device_attribute *attr, const char *buf, size_t count)
 	if (!touch_pdata->raw_data)
 		return -ENOMEM;
 
+	// dump_stack();
+	pr_info("%s: head = %d, tail = %d\n", __func__, touch_pdata->raw_head, touch_pdata->raw_tail);
+
 	if (touch_pdata->raw_head != touch_pdata->raw_tail)
 		sysfs_notify(&xiaomi_touch_dev.dev->kobj, NULL,  "update_rawdata");
-
-	pr_info("%s notify buf\n", __func__);
 
 	return count;
 }
@@ -1403,8 +1410,8 @@ struct device_attribute *attr, const char *buf, size_t count)
 			return -EINVAL;
 
 	pr_info("%s,%d\n", __func__, input);
-	// if (touch_data->enable_clicktouch_raw)
-	// 	touch_data->enable_clicktouch_raw(input);
+	if (touch_data->enable_clicktouch_raw)
+		touch_data->enable_clicktouch_raw(input);
 
 	return count;
 }
