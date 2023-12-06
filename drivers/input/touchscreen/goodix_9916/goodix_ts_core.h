@@ -67,6 +67,7 @@
 #define GTP_RESULT_FAIL					1
 #define GTP_RESULT_PASS					2
 #define CONFIG_TOUCHSCREEN_GOODIX_BRL_SPI
+#define CONFIG_TOUCHSCREEN_QGKI_GOODIX
 
 #define PANEL_ORIENTATION_DEGREE_0	0	/* normal portrait orientation */
 #define PANEL_ORIENTATION_DEGREE_90	1	/* anticlockwise 90 degrees */
@@ -240,6 +241,7 @@ struct goodix_ic_info_misc { /* other data */
 };
 
 struct goodix_ic_info_other {
+	u16 normalize_k_version;
 	u32 irrigation_data_addr;
 	u32 algo_debug_data_addr;
 	u16 algo_debug_data_len;
@@ -620,7 +622,6 @@ struct goodix_ts_core {
 #ifdef TOUCH_THP_SUPPORT
 	int enable_touch_raw;
 #endif
-	int sync_mode;
 	struct delayed_work panel_notifier_register_work;
 	
 	// int hang_debug;

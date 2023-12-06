@@ -1,16 +1,18 @@
 #include "goodix_ts_core.h"
 #include "goodix_brl_normalize_coeffi.h"
 
+void goto_next_line(char **ptr);
+
 unsigned char panel_lockdown[8] = { 0x53,0x42, 0x32, 0x03, 0x4d, 0x31, 0x32, 0x01 };
 
-normalize_k_head_t normalize_k_array[20];
+struct normalize_k_param normalize_k_array[20];
 
 #define next_token() \
     token = strsep(&ptr, ","); \
     if (token == NULL || kstrtoint(token, 10, &tmp) != 0) \
             goto parse_err
 
-int goodix_normalize_coeffi_update(goodix_ts_core *cd) {
+int goodix_normalize_coeffi_update(struct goodix_ts_core *cd) {
     const struct firmware *fw = NULL;
     int rc, i, tmp, j, k;
     unsigned char buf[8] = { 0 };
@@ -18,8 +20,8 @@ int goodix_normalize_coeffi_update(goodix_ts_core *cd) {
     char* csv_file;
     char* csv_buf;
     char target_name[6];
-    char* ptr, token;
-    char* buf0, buf1;
+    char *ptr, *token;
+    char *buf0 = NULL, *buf1 = NULL;
 
     if (cd == NULL) {
         return -1;
@@ -27,10 +29,10 @@ int goodix_normalize_coeffi_update(goodix_ts_core *cd) {
 
     rc = cd->hw_ops->read(cd, TS_LOCKDOWN_REG, buf, sizeof(buf));
     if (rc != 0) {
-        ts_err("read lockdown info failed! cnt: %d", 1)
+        ts_err("read lockdown info failed! cnt: %d", 1);
         rc = cd->hw_ops->read(cd, TS_LOCKDOWN_REG, buf, sizeof(buf));
         if (rc != 0) {
-            ts_err("read lockdown info failed! cnt: %d", 2)
+            ts_err("read lockdown info failed! cnt: %d", 2);
             return -1;
         }
     }
@@ -46,7 +48,7 @@ int goodix_normalize_coeffi_update(goodix_ts_core *cd) {
     }
 
     ts_info("k_file_name:%s", csv_file);
-    rc = request_firmware(&fw, csv_file, cd->pdev);
+    rc = request_firmware(&fw, csv_file, &cd->pdev->dev);
     if (rc < 0) {
         ts_err("normalize k file [%s] not available", csv_file);
         return -EINVAL;
@@ -108,7 +110,7 @@ other_err:
                 goto other_err;
             }
             goto_next_line(&ptr);
-            if (ptr == NULL || *ptr = '\0') {
+            if (ptr == NULL || *ptr == '\0') {
                 rc = -5;
                 if (normalize_k_array[i].data != NULL) {
                     kfree(normalize_k_array[i].data);
@@ -166,7 +168,7 @@ other_err:
         if (cd->ic_info.other.normalize_k_version == 0xffff) {
             ts_info("current normalize K version 0x%x, need update", 0xffff);
         } else {
-            if (normalize_k_array[0].head.version = cd->ic_info.other.normalize_k_version) {
+            if (normalize_k_array[0].head.version == cd->ic_info.other.normalize_k_version) {
                 ts_info("no need update normalize coeffi, k version: %d\n", normalize_k_array[0].head.version);
                 rc = 0;
                 goto clean_up;
@@ -200,4 +202,5 @@ clean_up:
         kfree(normalize_k_array[i].data);
         normalize_k_array[i].data = NULL;
     }
+    return rc;
 }

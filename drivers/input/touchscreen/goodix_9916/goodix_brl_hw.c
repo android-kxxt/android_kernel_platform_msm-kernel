@@ -1274,7 +1274,12 @@ static int brl_after_event_handler(struct goodix_ts_core *cd)
 	struct goodix_ic_info_misc *misc = &cd->ic_info.misc;
 	u8 sync_clean = 0;
 
-	return hw_ops->write(cd, misc->touch_data_addr,
+	if ((cd->enable_touch_raw == 0) || atomic_read(&cd->suspended)) {
+		// TODO: check condition. Looks odd
+		return hw_ops->write(cd, misc->touch_data_addr,
+									&sync_clean, 1);
+	}
+	return hw_ops->write(cd, misc->frame_data_addr,
 		&sync_clean, 1);
 }
 
